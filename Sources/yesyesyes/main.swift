@@ -66,15 +66,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showWindow() {
-        if window == nil {
-            let w = NSWindow(contentViewController: NSHostingController(rootView: RulesView(model: model)))
+        let view = NSHostingController(rootView: RulesView(model: model))
+        if let window {
+            window.contentViewController = view
+        } else {
+            let w = NSWindow(contentViewController: view)
             w.title = "yesyesyes"
             w.styleMask = [.titled, .closable, .resizable]
             w.isReleasedWhenClosed = false
+            w.center()
             window = w
         }
         NSApp.activate(ignoringOtherApps: true)
-        window?.center()
         window?.makeKeyAndOrderFront(nil)
     }
 }
