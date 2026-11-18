@@ -1,6 +1,7 @@
 mod app;
 mod backend;
 mod core;
+mod gate_server;
 mod icons;
 mod login;
 #[cfg(target_os = "macos")]

@@ -1,3 +1,4 @@
+use super::gate::GateSettings;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -22,14 +23,31 @@ impl Rule {
     }
 }
 
+/// Where yesyesyes answers Claude: one channel at a time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Channel {
+    /// Presses the buttons of the notifications, by the rules.
+    #[default]
+    Notifications,
+    /// Answers the permission requests of Claude Code's hook, by the gate.
+    ClaudeCode,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
+    /// Off (paused) when false, whatever the channel.
     #[serde(default = "yes")]
     pub enabled: bool,
+    #[serde(default)]
+    pub channel: Channel,
     #[serde(default)]
     pub rules: Vec<Rule>,
     #[serde(default)]
     pub log: LogSettings,
+    /// The answers to Claude Code's permission requests (see `gate`).
+    #[serde(default)]
+    pub gate: GateSettings,
 }
 
 /// Saving the clicks to a file: off by default. No path means the default one of the OS.
@@ -47,7 +65,7 @@ fn yes() -> bool {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { enabled: true, rules: Vec::new(), log: LogSettings::default() }
+        Config { enabled: true, channel: Channel::Notifications, rules: Vec::new(), log: LogSettings::default(), gate: GateSettings::default() }
     }
 }
 
@@ -121,7 +139,8 @@ mod tests {
         let store = ConfigStore { path: dir.join("config.json") };
         assert_eq!(store.load(), Config::default());
         let log = LogSettings { save: true, path: Some("~/clicks.jsonl".into()) };
-        let c = Config { enabled: false, rules: vec![Rule::new("Claude", "Allow once")], log };
+        let gate = GateSettings { mode: crate::core::gate::Mode::Regex, regex: "Bash: ls".into(), ignore_case: false };
+        let c = Config { enabled: false, channel: Channel::ClaudeCode, rules: vec![Rule::new("Claude", "Allow once")], log, gate };
         store.save(&c).unwrap();
         assert_eq!(store.load(), c);
         std::fs::remove_dir_all(dir).unwrap();
@@ -131,6 +150,7 @@ mod tests {
     fn reads_the_swift_app_format() {
         let c: Config = serde_json::from_str(r#"{"rules":[{"action":"Allow once","app":"Claude"}]}"#).unwrap();
         assert!(c.enabled);
+        assert_eq!(c.channel, Channel::Notifications);
         assert!(!c.log.save, "the log file is off by default");
         assert_eq!(c.rules, vec![Rule::new("Claude", "Allow once")]);
     }

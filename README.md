@@ -29,18 +29,55 @@ Needs Rust 1.95 or later, best through rustup (`brew install rustup` on macOS; t
 
 ## Use
 
-The tray icon is a Y in a ring; crossed out when paused. Its menu has **Pause** / **Start** and
-**Configure…**, which opens the window with the rules, the recent clicks and **Launch at login**. While paused nothing is pressed, but matching
-notifications still show in the recent clicks (and the log file) as *ignored*.
-Each recent click shows the start of the notification text (e.g. the command Claude asked to
-run); click it to see the whole text. The text stays in memory only, for the last 50 clicks, and
-is gone when you quit, unless you turn on **Save the log to a file** (off by default).
+The tray icon is a Y in a ring; crossed out when off. Its menu has **Pause** / **Start** and
+**Configure…**, which opens the window. At its top, **Answer Claude through** picks one channel:
 
-The log file has one JSON line per click (time, app, button, result, notification text) and is
+- **Off**: nothing is pressed or answered; matching notifications and requests still show in the
+  recent clicks (and the log file) as *ignored*. Pause in the tray menu is the same.
+- **Notifications**: presses notification buttons by the rules below.
+- **Claude Code requests**: answers Claude Code before any prompt (see below); notifications
+  are left alone.
+
+Each recent click shows the start of what Claude asked (the whole request when Claude Code sent
+it, else the notification text); click it to see all of it. The text stays in memory only, for the last 100 clicks, and
+is gone when you quit, unless you turn on **Save the log to a file** (off by default): then the
+file keeps the last 100 (the oldest are dropped) and the recent clicks show them again at start.
+
+The log file has one JSON line per click (time, app, button, result, what Claude asked) and is
 readable by you only. By default it is `~/Library/Logs/yesyesyes/clicks.jsonl` (macOS, also
 shown in Console), `~/.local/state/yesyesyes/clicks.jsonl` (Linux) or
-`%LOCALAPPDATA%\yesyesyes\clicks.jsonl` (Windows); type another path in the window to change it.
+`%LOCALAPPDATA%\yesyesyes\clicks.jsonl` (Windows); type another path in the window, or pick one with **Choose…**, to change it.
 The text may contain commands, paths or secrets: check it before sharing.
+
+### Claude Code requests
+
+Add this hook to `~/.claude/settings.json`:
+
+```json
+"hooks": { "PermissionRequest": [ { "matcher": "*", "hooks": [
+  { "type": "http", "url": "http://127.0.0.1:47331/claude/permission", "timeout": 5 } ] } ] }
+```
+
+Claude Code then sends each permission request, whole, to yesyesyes (on this computer only),
+before any prompt or notification:
+
+- yesyesyes keeps the last 100 in memory: Claude Desktop cuts the text of its notifications, and
+  the recent clicks show the whole request of the matching one.
+- with the channel **Claude Code requests**, yesyesyes answers. Pick how in the window:
+  - **Ignore** (default): you are asked as usual.
+  - **Allow everything**: no request is asked, whatever the command.
+  - **Deny everything**: Claude is told yesyesyes denied it.
+  - **Allow what matches a regex**: the regex must match the whole `Tool: input`, e.g.
+    `Bash: git (status|diff)( .*)?`; the rest is asked. A Bash command with `;` `&` `|` `` ` ``
+    `$(` `>` `<` or a new line is always asked. Upper and lower case match each other unless you
+    turn off **Ignore upper and lower case**. Type a request under it (e.g. `Bash: git status`)
+    to see what it would answer.
+
+  Off, with the channel Notifications, or when yesyesyes is not running, you are asked as usual. Each answer shows in
+  the recent clicks. Nothing leaves the computer.
+
+Any program on this computer can listen on port 47331 while yesyesyes is not running, and
+Claude Code would take its answers. yesyesyes says so in its window when the port is busy.
 
 A rule is the app name (as it appears in the notification) and the exact button label, e.g.
 app Claude, button Allow once. Every rule needs both.

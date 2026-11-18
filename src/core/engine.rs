@@ -12,6 +12,8 @@ pub struct ClickEvent {
     pub action: String,
     pub result: ClickResult,
     pub texts: Vec<String>,
+    /// The whole request the notification shows cut, when a hook logged it (see `requests`).
+    pub request: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +22,9 @@ pub enum ClickResult {
     Failed,
     /// Seen while paused: logged, not pressed.
     Ignored,
+    /// A Claude Code request answered by the gate.
+    Allowed,
+    Denied,
 }
 
 impl ClickResult {
@@ -28,6 +33,8 @@ impl ClickResult {
             ClickResult::Pressed => "pressed",
             ClickResult::Failed => "failed",
             ClickResult::Ignored => "ignored",
+            ClickResult::Allowed => "allowed",
+            ClickResult::Denied => "denied",
         }
     }
 }
@@ -36,9 +43,10 @@ const SNIPPET: usize = 60;
 
 impl ClickEvent {
     /// The longest line of the notification (usually the command), on one line, cut to fit.
+    /// The whole request instead, when it is known.
     pub fn snippet(&self) -> String {
         let longest = self.texts.iter().max_by_key(|t| t.chars().count()).map(String::as_str).unwrap_or("");
-        let line = longest.split_whitespace().collect::<Vec<_>>().join(" ");
+        let line = self.request.as_deref().unwrap_or(longest).split_whitespace().collect::<Vec<_>>().join(" ");
         if line.chars().count() <= SNIPPET {
             return line;
         }
@@ -48,6 +56,11 @@ impl ClickEvent {
 
     pub fn full_text(&self) -> String {
         self.texts.join("\n")
+    }
+
+    /// What Claude asked, whole, when known; else the text of the notification.
+    pub fn shown_text(&self) -> String {
+        self.request.clone().unwrap_or_else(|| self.full_text())
     }
 }
 
@@ -104,6 +117,7 @@ impl Engine {
                     action: rule.action.clone(),
                     result,
                     texts: hit.texts,
+                    request: None,
                 });
             }
         }
@@ -162,6 +176,7 @@ mod tests {
             action: "Allow once".into(),
             result: ClickResult::Pressed,
             texts: texts.iter().map(|t| t.to_string()).collect(),
+            request: None,
         }
     }
 

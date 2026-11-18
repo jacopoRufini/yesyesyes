@@ -1,16 +1,20 @@
 use crate::backend::Access;
+use crate::core::requests::{self, Request};
 use crate::core::{ClickEvent, Config, ConfigStore, clicklog};
 #[cfg(test)]
 use crate::core::ClickResult;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-pub const LOG_SIZE: usize = 50;
+/// Recent clicks kept: as many as the log file keeps.
+pub const LOG_SIZE: usize = clicklog::MAX_LINES;
 
-/// Shared by the window, the tray menu and the engine thread.
+/// Shared by the window, the tray menu, the engine thread and the Claude Code server.
 pub struct Shared {
     pub config: Config,
     pub events: VecDeque<ClickEvent>,
+    /// The last Claude Code requests, oldest first, in memory only.
+    pub requests: Vec<Request>,
     pub access: Access,
     pub show_window: bool,
     pub error: Option<String>,
@@ -24,9 +28,13 @@ pub struct State {
 
 impl State {
     pub fn new(store: ConfigStore) -> Self {
+        let config = store.load();
+        // With the log file on, the recent clicks survive a restart.
+        let events = if config.log.save { clicklog::read(&clicklog::resolve(config.log.path.as_deref())).into() } else { VecDeque::new() };
         let shared = Shared {
-            config: store.load(),
-            events: VecDeque::new(),
+            config,
+            events,
+            requests: Vec::new(),
             access: Access::Unknown,
             show_window: false,
             error: None,
@@ -45,9 +53,21 @@ impl State {
         shared.error = self.store.save(&shared.config).err().map(|e| format!("Could not save the rules: {e}"));
     }
 
+    /// Keeps a Claude Code request, to show it whole with its notification.
+    pub fn remember(&self, request: Request) {
+        let requests = &mut self.lock().requests;
+        requests.push(request);
+        let extra = requests.len().saturating_sub(LOG_SIZE);
+        requests.drain(..extra);
+    }
+
     /// Keeps the events in memory and, when the user turned it on, appends them to the log file.
-    pub fn record(&self, events: Vec<ClickEvent>) {
+    /// Each one gets the whole Claude Code request it shows cut, when there is one.
+    pub fn record(&self, mut events: Vec<ClickEvent>) {
         let mut shared = self.lock();
+        for event in events.iter_mut().filter(|e| e.request.is_none()) {
+            event.request = requests::find(&shared.requests, event.at, &event.texts).map(|r| r.text.clone());
+        }
         if shared.config.log.save {
             let path = clicklog::resolve(shared.config.log.path.as_deref());
             if let Err(e) = clicklog::append(&path, &events) {
@@ -67,7 +87,7 @@ mod tests {
     use chrono::Local;
 
     fn event() -> ClickEvent {
-        ClickEvent { id: 1, at: Local::now(), app: "Claude".into(), action: "Allow once".into(), result: ClickResult::Pressed, texts: vec!["Run ls".into()] }
+        ClickEvent { id: 1, at: Local::now(), app: "Claude".into(), action: "Allow once".into(), result: ClickResult::Pressed, texts: vec!["Run ls".into()], request: None }
     }
 
     #[test]
@@ -85,5 +105,29 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
         assert_eq!(state.lock().events.len(), 2);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn attaches_the_whole_request() {
+        let state = State::new(ConfigStore { path: std::env::temp_dir().join("yyy-state-req-unused.json") });
+        let at = Local::now().to_rfc3339();
+        state.remember(requests::sample(&at, "Bash", r#"{"command": "cargo test --workspace --all-features -- --nocapture"}"#));
+        let mut cut = event();
+        cut.texts = vec!["Claude, Allow Claude to run cargo test --workspace --all-feat…?".into()];
+        state.record(vec![cut, event()]);
+        let events = &state.lock().events;
+        assert_eq!(events[1].request.as_deref(), Some("cargo test --workspace --all-features -- --nocapture"));
+        assert_eq!(events[0].request, None);
+    }
+
+    #[test]
+    fn remembers_only_the_last_requests() {
+        let state = State::new(ConfigStore { path: std::env::temp_dir().join("yyy-state-many-unused.json") });
+        for n in 0..LOG_SIZE + 5 {
+            state.remember(requests::sample("2026-11-18T15:50:12+01:00", "Bash", &format!(r#"{{"command": "echo {n}"}}"#)));
+        }
+        let requests = &state.lock().requests;
+        assert_eq!(requests.len(), LOG_SIZE);
+        assert_eq!(requests[0].text, "echo 5");
     }
 }
