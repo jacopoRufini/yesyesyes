@@ -1,0 +1,34 @@
+[package]
+name = "yesyesyes"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Presses the notification buttons you choose, for the apps you choose"
+license = "MIT"
+
+[dependencies]
+auto-launch = "0.6.0"
+chrono = "0.4.45"
+dirs = "7.0.0"
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "clipboard", "wayland", "x11"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+# ksni: the Linux tray talks D-Bus directly, no GTK
+tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.1"
+objc2 = "0.6.5"
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"
+winit = "0.30"
+
+[target."cfg(windows)".dependencies]
+uiautomation = "0.25.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5.19"
+
+[profile.release]
+lto = true
+strip = true
