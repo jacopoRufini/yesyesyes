@@ -25,7 +25,7 @@ on another OS, say so in the pull request.
 
 ## Releases
 
-Maintainers run `scripts/release.sh X.Y.Z`: it bumps the version, tags and pushes, and the Release
+Maintainers run `scripts/release.sh X.Y.Z`: it opens a version-bump pull request, merges it once CI passes, tags it, and the Release
 workflow publishes the binaries. Add the change to [CHANGELOG.md](CHANGELOG.md) before.
 
 ## Conduct
