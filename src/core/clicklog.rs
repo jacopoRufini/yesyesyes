@@ -44,6 +44,8 @@ pub fn line(event: &ClickEvent) -> String {
         "button": event.action,
         "result": event.result.label(),
         "text": event.shown_text(),
+        "rule": event.rule,
+        "chat": event.chat,
     })
     .to_string()
 }
@@ -113,6 +115,8 @@ fn parse(line: &str) -> Option<ClickEvent> {
         result,
         texts: vec![field("text").unwrap_or_default().to_string()],
         request: None,
+        rule: field("rule").map(String::from),
+        chat: field("chat").map(String::from),
     })
 }
 
@@ -131,6 +135,8 @@ mod tests {
             result,
             texts: vec!["Claude".into(), "Run echo \"hi\"".into()],
             request: None,
+            rule: Some("Regex git .*".into()),
+            chat: Some("yesyesyes".into()),
         }
     }
 
@@ -193,6 +199,8 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].result, ClickResult::Ignored);
         assert_eq!((events[1].result, events[1].shown_text().as_str()), (ClickResult::Allowed, "git status"));
+        assert_eq!(events[1].rule.as_deref(), Some("Regex git .*"), "the option that answered it");
+        assert_eq!(events[1].chat.as_deref(), Some("yesyesyes"), "the chat that asked");
         assert_ne!(events[0].id, events[1].id);
         assert!(read(&dir.join("missing.jsonl")).is_empty());
         std::fs::remove_dir_all(dir).unwrap();

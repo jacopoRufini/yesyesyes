@@ -3,8 +3,10 @@ name = "yesyesyes"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
-description = "Presses the notification buttons you choose, for the apps you choose"
+description = "Tray app that answers Claude's permission requests by your rules: notification buttons, Claude Code hooks, a regex or a local LLM"
 license = "MIT"
+readme = "README.md"
+publish = false
 
 [dependencies]
 auto-launch = "0.6.0"
@@ -17,6 +19,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 # ksni: the Linux tray talks D-Bus directly, no GTK
 tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
+ureq = { version = "3", default-features = false, features = ["json"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"

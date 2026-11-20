@@ -34,7 +34,7 @@ pub enum Channel {
     ClaudeCode,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// Off (paused) when false, whatever the channel.
     #[serde(default = "yes")]
@@ -48,6 +48,9 @@ pub struct Config {
     /// The answers to Claude Code's permission requests (see `gate`).
     #[serde(default)]
     pub gate: GateSettings,
+    /// Minutes after which yesyesyes turns itself off, so it is not left on by mistake; 0: never.
+    #[serde(default = "auto_off_minutes")]
+    pub auto_off_minutes: u32,
 }
 
 /// Saving the clicks to a file: off by default. No path means the default one of the OS.
@@ -59,13 +62,19 @@ pub struct LogSettings {
     pub path: Option<String>,
 }
 
+pub const AUTO_OFF_MINUTES: u32 = 60;
+
+fn auto_off_minutes() -> u32 {
+    AUTO_OFF_MINUTES
+}
+
 fn yes() -> bool {
     true
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { enabled: true, channel: Channel::Notifications, rules: Vec::new(), log: LogSettings::default(), gate: GateSettings::default() }
+        Config { enabled: true, channel: Channel::Notifications, rules: Vec::new(), log: LogSettings::default(), gate: GateSettings::default(), auto_off_minutes: AUTO_OFF_MINUTES }
     }
 }
 
@@ -139,8 +148,8 @@ mod tests {
         let store = ConfigStore { path: dir.join("config.json") };
         assert_eq!(store.load(), Config::default());
         let log = LogSettings { save: true, path: Some("~/clicks.jsonl".into()) };
-        let gate = GateSettings { mode: crate::core::gate::Mode::Regex, regex: "Bash: ls".into(), ignore_case: false };
-        let c = Config { enabled: false, channel: Channel::ClaudeCode, rules: vec![Rule::new("Claude", "Allow once")], log, gate };
+        let gate = GateSettings { mode: crate::core::gate::Mode::Regex, regex: "Bash: ls".into(), ignore_case: false, ..GateSettings::default() };
+        let c = Config { enabled: false, channel: Channel::ClaudeCode, rules: vec![Rule::new("Claude", "Allow once")], log, gate, auto_off_minutes: 30 };
         store.save(&c).unwrap();
         assert_eq!(store.load(), c);
         std::fs::remove_dir_all(dir).unwrap();

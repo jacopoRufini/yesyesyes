@@ -14,6 +14,10 @@ pub struct ClickEvent {
     pub texts: Vec<String>,
     /// The whole request the notification shows cut, when a hook logged it (see `requests`).
     pub request: Option<String>,
+    /// The option that answered a Claude Code request (`gate::rule`).
+    pub rule: Option<String>,
+    /// The name of the Claude Code chat that sent the request.
+    pub chat: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +66,28 @@ impl ClickEvent {
     pub fn shown_text(&self) -> String {
         self.request.clone().unwrap_or_else(|| self.full_text())
     }
+
+    /// Whether the event is from the chat (any when `None`) and has the search words, in any case,
+    /// in its app, button, chat, option, result or text.
+    pub fn matches(&self, chat: Option<&str>, search: &str) -> bool {
+        if chat.is_some_and(|c| self.chat.as_deref() != Some(c)) {
+            return false;
+        }
+        let fields = [&self.app, &self.action, self.chat.as_deref().unwrap_or(""), self.rule.as_deref().unwrap_or(""), self.result.label(), &self.shown_text()];
+        let haystack = fields.join("\n").to_lowercase();
+        search.to_lowercase().split_whitespace().all(|word| haystack.contains(word))
+    }
+}
+
+/// The chats of the events, most recent first, each once.
+pub fn chats(events: &[ClickEvent]) -> Vec<String> {
+    let mut chats: Vec<String> = Vec::new();
+    for chat in events.iter().filter_map(|e| e.chat.as_ref()) {
+        if !chats.contains(chat) {
+            chats.push(chat.clone());
+        }
+    }
+    chats
 }
 
 pub struct Engine {
@@ -118,6 +144,8 @@ impl Engine {
                     result,
                     texts: hit.texts,
                     request: None,
+                    rule: None,
+                    chat: None,
                 });
             }
         }
@@ -177,7 +205,28 @@ mod tests {
             result: ClickResult::Pressed,
             texts: texts.iter().map(|t| t.to_string()).collect(),
             request: None,
+            rule: None,
+            chat: None,
         }
+    }
+
+    #[test]
+    fn filters_by_chat_and_words() {
+        let mut one = event(&["Claude", "git status"]);
+        one.chat = Some("yesyesyes".into());
+        one.rule = Some("Claude's opinion".into());
+        let mut two = event(&["Claude", "cargo test"]);
+        two.chat = Some("contact-less".into());
+        let three = event(&["Claude", "ls"]);
+        assert!(one.matches(None, ""));
+        assert!(one.matches(Some("yesyesyes"), ""));
+        assert!(!two.matches(Some("yesyesyes"), ""));
+        assert!(!three.matches(Some("yesyesyes"), ""), "no chat");
+        assert!(one.matches(None, "GIT  status"), "words in any case");
+        assert!(one.matches(None, "opinion git"), "the option too");
+        assert!(two.matches(None, "contact"), "the chat too");
+        assert!(!one.matches(None, "git push"));
+        assert_eq!(chats(&[two.clone(), one.clone(), two, three]), vec!["contact-less", "yesyesyes"]);
     }
 
     #[test]

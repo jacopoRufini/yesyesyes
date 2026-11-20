@@ -2,7 +2,7 @@
 //! JSON in, the hook answer out. Listens on 127.0.0.1 only and refuses requests from web pages.
 
 use crate::core::gate::{self, Decision};
-use crate::core::{Channel, ClickEvent, ClickResult, requests};
+use crate::core::{Channel, ClickEvent, ClickResult, requests, transcript};
 use crate::state::State;
 use chrono::Local;
 use eframe::egui;
@@ -109,7 +109,13 @@ fn answer(hook: &Value, state: &State) -> Value {
         return json!({});
     }
     let (decision, reason) = gate::decide(&settings, active, &request.tool, &request.text);
-    state.record(vec![event(&request, decision)]);
+    let mut rule = gate::rule(&settings, active);
+    if active && settings.mode == gate::Mode::Opinion
+        && let Some(model) = claude_model(hook)
+    {
+        rule = format!("{rule} {model}");
+    }
+    state.record(vec![event(&request, decision, rule, chat_name(hook))]);
     state.remember(request);
     let decision = match decision {
         Decision::Allow => json!({ "behavior": "allow" }),
@@ -119,7 +125,19 @@ fn answer(hook: &Value, state: &State) -> Value {
     json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision } })
 }
 
-fn event(request: &requests::Request, decision: Decision) -> ClickEvent {
+/// The model of the Claude Code session that sent the request, from its transcript.
+fn claude_model(hook: &Value) -> Option<String> {
+    let path = hook.get("transcript_path")?.as_str()?;
+    transcript::last_model(std::path::Path::new(path), &dirs::home_dir()?.join(".claude"))
+}
+
+/// The name of the Claude Code chat that sent the request, from its transcript.
+fn chat_name(hook: &Value) -> Option<String> {
+    let path = hook.get("transcript_path")?.as_str()?;
+    transcript::chat_name(std::path::Path::new(path), &dirs::home_dir()?.join(".claude"))
+}
+
+fn event(request: &requests::Request, decision: Decision, rule: String, chat: Option<String>) -> ClickEvent {
     let result = match decision {
         Decision::Allow => ClickResult::Allowed,
         Decision::Deny => ClickResult::Denied,
@@ -133,6 +151,8 @@ fn event(request: &requests::Request, decision: Decision) -> ClickEvent {
         result,
         texts: vec![request.text.clone()],
         request: Some(request.text.clone()),
+        rule: Some(rule),
+        chat,
     }
 }
 
@@ -167,7 +187,7 @@ mod tests {
         {
             let config = &mut state.lock().config;
             config.channel = Channel::ClaudeCode;
-            config.gate = GateSettings { mode, regex: regex.into(), ignore_case: false };
+            config.gate = GateSettings { mode, regex: regex.into(), ignore_case: false, ..GateSettings::default() };
         }
         let address = start_on(state.clone(), egui::Context::default(), 0).unwrap();
         (state, address)

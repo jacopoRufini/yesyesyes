@@ -1,4 +1,5 @@
 use crate::backend::Access;
+use crate::core::llm::LlmState;
 use crate::core::requests::{self, Request};
 use crate::core::{ClickEvent, Config, ConfigStore, clicklog};
 #[cfg(test)]
@@ -17,6 +18,16 @@ pub struct Shared {
     pub requests: Vec<Request>,
     pub access: Access,
     pub show_window: bool,
+    /// The local LLM, kept loaded by `llm_bridge`.
+    pub llm: LlmState,
+    /// Asked by the window: unload the other models so ours can load.
+    pub llm_unload_others: bool,
+    /// Bytes of memory the loaded model takes, when known.
+    pub llm_memory: Option<u64>,
+    /// When yesyesyes turns itself off (`autooff`).
+    pub off_at: Option<chrono::DateTime<chrono::Local>>,
+    /// When the last request or notification was recorded: `autooff` counts inactivity from it.
+    pub last_activity: Option<std::time::Instant>,
     pub error: Option<String>,
 }
 
@@ -37,6 +48,11 @@ impl State {
             requests: Vec::new(),
             access: Access::Unknown,
             show_window: false,
+            llm: LlmState::Off,
+            llm_unload_others: false,
+            llm_memory: None,
+            off_at: None,
+            last_activity: None,
             error: None,
         };
         State { inner: Arc::new(Mutex::new(shared)), store }
@@ -65,6 +81,9 @@ impl State {
     /// Each one gets the whole Claude Code request it shows cut, when there is one.
     pub fn record(&self, mut events: Vec<ClickEvent>) {
         let mut shared = self.lock();
+        if !events.is_empty() {
+            shared.last_activity = Some(std::time::Instant::now());
+        }
         for event in events.iter_mut().filter(|e| e.request.is_none()) {
             event.request = requests::find(&shared.requests, event.at, &event.texts).map(|r| r.text.clone());
         }
@@ -87,7 +106,7 @@ mod tests {
     use chrono::Local;
 
     fn event() -> ClickEvent {
-        ClickEvent { id: 1, at: Local::now(), app: "Claude".into(), action: "Allow once".into(), result: ClickResult::Pressed, texts: vec!["Run ls".into()], request: None }
+        ClickEvent { id: 1, at: Local::now(), app: "Claude".into(), action: "Allow once".into(), result: ClickResult::Pressed, texts: vec!["Run ls".into()], request: None, rule: None, chat: None }
     }
 
     #[test]

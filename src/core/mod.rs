@@ -4,9 +4,11 @@ pub mod clicklog;
 mod config;
 mod engine;
 pub mod gate;
+pub mod llm;
 mod matcher;
 pub mod requests;
+pub mod transcript;
 
 pub use config::{AddResult, Channel, Config, ConfigStore, LogSettings, Rule};
-pub use engine::{ClickEvent, ClickResult, Engine};
+pub use engine::{ClickEvent, ClickResult, Engine, chats};
 pub use matcher::{Hit, Node, Outcome, find_all, press};

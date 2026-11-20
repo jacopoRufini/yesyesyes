@@ -30,6 +30,7 @@ impl Tray {
             } else if event.id == *configure {
                 state.lock().show_window = true;
             } else if event.id == *quit {
+                crate::llm_bridge::release(&state);
                 std::process::exit(0);
             }
             ctx.request_repaint();

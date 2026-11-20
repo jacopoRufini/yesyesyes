@@ -1,5 +1,7 @@
 //! The rules and log window (egui). Closing it only hides it; the app lives in the tray.
 
+mod llm_panel;
+
 use crate::backend::{Access, Backend, Platform};
 use crate::core::gate::{self, Decision, Mode};
 use crate::core::{AddResult, Channel, ClickEvent, ClickResult, Engine, LogSettings, Rule, clicklog};
@@ -22,8 +24,14 @@ pub struct App {
     expanded: Option<u64>,
     log_path: String,
     gate_regex: String,
-    /// A request typed to try the regex, never saved.
+    /// One wildcard per line.
+    gate_wildcards: String,
+    /// A request typed to try the regex or the wildcards, never saved.
     gate_try: String,
+    llm: llm_panel::LlmPanel,
+    /// Recent requests shown: of this chat only, and with these words.
+    log_chat: Option<String>,
+    log_search: String,
 }
 
 impl App {
@@ -31,6 +39,8 @@ impl App {
         apply_text_sizes(&cc.egui_ctx);
         start_engine(state.clone(), cc.egui_ctx.clone());
         crate::gate_server::start(state.clone(), cc.egui_ctx.clone());
+        crate::llm_bridge::start(state.clone(), cc.egui_ctx.clone());
+        crate::autooff::start(state.clone(), cc.egui_ctx.clone());
         let tray = match Tray::new(state.clone(), cc.egui_ctx.clone()) {
             Ok(tray) => Some(tray),
             Err(e) => {
@@ -41,11 +51,11 @@ impl App {
                 None
             }
         };
-        let (log_path, gate_regex) = {
+        let (log_path, gate_regex, gate_wildcards, llm) = {
             let config = &state.lock().config;
-            (config.log.path.clone().unwrap_or_default(), config.gate.regex.clone())
+            (config.log.path.clone().unwrap_or_default(), config.gate.regex.clone(), config.gate.wildcards.clone(), llm_panel::LlmPanel::new(&config.gate.llm))
         };
-        App { state, tray, new_app: String::new(), new_action: String::new(), form_error: None, expanded: None, log_path, gate_regex, gate_try: String::new() }
+        App { state, tray, new_app: String::new(), new_action: String::new(), form_error: None, expanded: None, log_path, gate_regex, gate_wildcards, gate_try: String::new(), llm, log_chat: None, log_search: String::new() }
     }
 
     /// Off by default. The path field shows the default of this OS until the user types another.
@@ -77,11 +87,6 @@ impl App {
                 self.state.update(|c| c.log.path = None);
             }
         });
-        ui.label(
-            RichText::new("One line per click, with what Claude asked: it may hold commands, paths or secrets. Readable by you only; check it before sharing.")
-                .weak()
-                .small(),
-        );
     }
 
     /// What yesyesyes answers to Claude Code's permission requests, through the hook.
@@ -91,31 +96,53 @@ impl App {
             for option in Mode::ALL {
                 ui.selectable_value(&mut chosen, option, option.label());
             }
-            for later in ["Allow what matches a wildcard (coming later)", "Ask an LLM (coming later)"] {
-                ui.add_enabled(false, egui::Button::selectable(false, later));
-            }
         });
         if chosen != mode {
             self.state.update(|c| c.gate.mode = chosen);
         }
         match chosen {
             Mode::Ignore => {}
+            Mode::Llm => self.llm.show(ui, &self.state),
             Mode::Allow => {
                 ui.colored_label(ERROR, "Every request runs without asking you: any command, file edit or tool Claude wants.");
             }
             Mode::Deny => {
                 ui.label(RichText::new("Claude is told each request was denied by yesyesyes.").weak());
             }
-            Mode::Regex => {
+            Mode::Opinion => {
+                ui.label(format!(
+                    "A Bash command ending with {tag}ACCEPT runs without asking you; {tag}ASK, no tag and every other tool are asked as usual.",
+                    tag = gate::OPINION_TAG
+                ));
+                ui.colored_label(ERROR, "Claude rates its own requests, and text it reads can make it write ACCEPT: an experiment, not a safeguard.");
+                ui.label(RichText::new(format!("Tell Claude in CLAUDE.md: end every Bash command with {tag}ACCEPT or {tag}ASK.", tag = gate::OPINION_TAG)).weak());
+            }
+            Mode::Regex | Mode::Wildcard => {
+                let wildcard = chosen == Mode::Wildcard;
                 let mut settings = self.state.lock().config.gate.clone();
+                settings.mode = chosen;
                 settings.regex = self.gate_regex.clone();
-                let verdict = (!self.gate_try.is_empty()).then(|| gate::try_regex(&settings, &self.gate_try));
+                settings.wildcards = self.gate_wildcards.clone();
+                let verdict = (!self.gate_try.is_empty()).then(|| gate::try_typed(&settings, &self.gate_try));
                 egui::Grid::new("gate-regex").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                    ui.label("Regex");
-                    let field = egui::TextEdit::singleline(&mut self.gate_regex).hint_text("Bash: git (status|diff)( .*)?").code_editor().desired_width(f32::INFINITY);
-                    if ui.add(field).changed() {
-                        let regex = self.gate_regex.clone();
-                        self.state.update(|c| c.gate.regex = regex);
+                    if wildcard {
+                        ui.label("Wildcards");
+                        let field = egui::TextEdit::multiline(&mut self.gate_wildcards)
+                            .hint_text("Bash: git status*\nBash: cargo test*\nRead: *")
+                            .code_editor()
+                            .desired_rows(4)
+                            .desired_width(f32::INFINITY);
+                        if ui.add(field).changed() {
+                            let wildcards = self.gate_wildcards.clone();
+                            self.state.update(|c| c.gate.wildcards = wildcards);
+                        }
+                    } else {
+                        ui.label("Regex");
+                        let field = egui::TextEdit::singleline(&mut self.gate_regex).hint_text("Bash: git (status|diff)( .*)?").code_editor().desired_width(f32::INFINITY);
+                        if ui.add(field).changed() {
+                            let regex = self.gate_regex.clone();
+                            self.state.update(|c| c.gate.regex = regex);
+                        }
                     }
                     ui.end_row();
 
@@ -127,9 +154,14 @@ impl App {
                     ui.end_row();
 
                     ui.label("");
-                    let help = match gate::compile(&self.gate_regex, settings.ignore_case) {
-                        Err(_) => RichText::new("Not a valid regex: every request is asked.").color(ERROR).small(),
-                        Ok(_) => RichText::new("Matched against the whole Tool: input, e.g. Bash: git status. Bash commands with ; & | ` $( > < or a new line are always asked.").weak().small(),
+                    const CHAINED: &str = "Bash commands with ; & | ` $( > < or a new line are always asked.";
+                    let help = if wildcard {
+                        RichText::new(format!("One per line, matched against the whole Tool: input; * is any text. {CHAINED}")).weak().small()
+                    } else {
+                        match gate::compile(&self.gate_regex, settings.ignore_case) {
+                            Err(_) => RichText::new("Not a valid regex: every request is asked.").color(ERROR).small(),
+                            Ok(_) => RichText::new(format!("Matched against the whole Tool: input, e.g. Bash: git status. {CHAINED}")).weak().small(),
+                        }
                     };
                     ui.add(egui::Label::new(help).wrap());
                     ui.end_row();
@@ -202,20 +234,31 @@ fn start_engine(state: State, ctx: egui::Context) {
 }
 
 impl eframe::App for App {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        crate::llm_bridge::release(&self.state);
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if ctx.input(|i| i.viewport().close_requested()) && self.tray.is_some() {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+            #[cfg(target_os = "macos")]
+            crate::macos_app::show_in_dock(false);
         }
         let (show, enabled) = {
             let mut shared = self.state.lock();
             (std::mem::take(&mut shared.show_window), shared.config.enabled)
         };
         if show {
+            #[cfg(target_os = "macos")]
+            crate::macos_app::open_on_this_desktop();
             ctx.send_viewport_cmd(ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(ViewportCommand::Focus);
             #[cfg(target_os = "macos")]
-            crate::macos_app::activate();
+            {
+                crate::macos_app::show_in_dock(true);
+                crate::macos_app::activate();
+            }
         }
         if let Some(tray) = &self.tray {
             tray.sync(enabled);
@@ -223,9 +266,9 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let (access, config, events, error) = {
+        let (access, config, events, error, off_at) = {
             let shared = self.state.lock();
-            (shared.access.clone(), shared.config.clone(), shared.events.clone(), shared.error.clone())
+            (shared.access.clone(), shared.config.clone(), shared.events.clone(), shared.error.clone(), shared.off_at)
         };
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("window").auto_shrink([false, false]).show(ui, |ui| {
@@ -238,6 +281,8 @@ impl eframe::App for App {
                     ui.label("Answer Claude through");
                     channel_picker(ui, &self.state, &config);
                     ui.add_space(16.0);
+                    auto_off_picker(ui, &self.state, &config, off_at);
+                    ui.add_space(16.0);
                     let mut at_login = login::is_enabled();
                     if ui.checkbox(&mut at_login, "Launch at login").changed() {
                         self.state.lock().error = login::set(at_login).err().map(|e| format!("Could not change Launch at Login: {e}"));
@@ -246,7 +291,7 @@ impl eframe::App for App {
 
                 let channel = config.enabled.then_some(config.channel);
                 if channel.is_none() {
-                    ui.label(RichText::new("Off: nothing is pressed or answered; matches are logged as ignored. Pick a channel to set it up.").weak());
+                    ui.label(RichText::new("Off: nothing is pressed or answered; matches are logged as asked. Pick a channel to set it up.").weak());
                 }
                 if channel == Some(Channel::Notifications) {
                     ui.add_space(4.0);
@@ -295,15 +340,40 @@ impl eframe::App for App {
                 }
 
                 ui.add_space(4.0);
-                ui.heading("Recent clicks");
+                ui.heading("Recent requests");
                 let kept = if config.log.save { "also saved to the log file below" } else { "it stays in memory only, until you quit" };
-                ui.label(RichText::new(format!("The last 100, newest first (ignored: seen while off, or left to you). Click a line to see what Claude asked, whole; {kept}.")).weak());
+                ui.label(RichText::new(format!("The last 100, newest first (asked: seen while off, or left to you). Click a line to see what Claude asked, whole; {kept}.")).weak());
                 self.log_file_options(ui, &config.log);
+                let events: Vec<ClickEvent> = events.into_iter().collect();
+                let chats = crate::core::chats(&events);
+                if self.log_chat.as_ref().is_some_and(|c| !chats.contains(c)) {
+                    self.log_chat = None;
+                }
+                let shown: Vec<&ClickEvent> = events.iter().filter(|e| e.matches(self.log_chat.as_deref(), &self.log_search)).collect();
+                ui.horizontal(|ui| {
+                    ui.label("Chat");
+                    egui::ComboBox::from_id_salt("log-chat").width(220.0).selected_text(self.log_chat.as_deref().unwrap_or("All chats")).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.log_chat, None, "All chats");
+                        for chat in &chats {
+                            ui.selectable_value(&mut self.log_chat, Some(chat.clone()), chat);
+                        }
+                    });
+                    ui.add(egui::TextEdit::singleline(&mut self.log_search).hint_text("Search: words in the request, chat or option").desired_width(320.0));
+                    if (self.log_chat.is_some() || !self.log_search.is_empty()) && ui.button("Clear").clicked() {
+                        self.log_chat = None;
+                        self.log_search.clear();
+                    }
+                    if shown.len() != events.len() {
+                        ui.label(RichText::new(format!("{} of {}", shown.len(), events.len())).weak());
+                    }
+                });
                 section(ui, |ui| {
                     if events.is_empty() {
                         ui.label(RichText::new("Nothing pressed yet.").weak());
+                    } else if shown.is_empty() {
+                        ui.label(RichText::new("No request matches.").weak());
                     }
-                    for (index, event) in events.iter().enumerate() {
+                    for (index, event) in shown.into_iter().enumerate() {
                         if index > 0 {
                             ui.separator();
                         }
@@ -312,6 +382,29 @@ impl eframe::App for App {
                 });
             });
         });
+    }
+}
+
+/// After how long yesyesyes turns itself off, and when it will.
+fn auto_off_picker(ui: &mut egui::Ui, state: &State, config: &crate::core::Config, off_at: Option<chrono::DateTime<chrono::Local>>) {
+    let label = |minutes: u32| match minutes {
+        0 => "never".to_string(),
+        m if m % 60 == 0 => format!("{} h", m / 60),
+        m => format!("{m} min"),
+    };
+    ui.label("Turn off after");
+    let mut minutes = config.auto_off_minutes;
+    egui::ComboBox::from_id_salt("auto-off").selected_text(label(minutes)).show_ui(ui, |ui| {
+        for option in crate::autooff::CHOICES {
+            ui.selectable_value(&mut minutes, option, label(option));
+        }
+    });
+    if minutes != config.auto_off_minutes {
+        state.update(|c| c.auto_off_minutes = minutes);
+    }
+    ui.label("of inactivity").on_hover_text("Each request answered or asked starts the wait over.");
+    if let Some(at) = off_at {
+        ui.label(format!("(at {} if no request comes)", at.format("%H:%M")));
     }
 }
 
@@ -362,13 +455,19 @@ fn log_row(ui: &mut egui::Ui, event: &ClickEvent, expanded: &mut Option<u64>) {
         ui.horizontal(|ui| {
             ui.label(RichText::new(event.at.format("%H:%M:%S").to_string()).monospace());
             ui.label(RichText::new(&event.app).strong());
+            if let Some(chat) = &event.chat {
+                ui.label(RichText::new(chat).italics()).on_hover_text("The Claude Code chat that asked");
+            }
             ui.label(&event.action);
+            if let Some(rule) = &event.rule {
+                ui.label(RichText::new(rule).small()).on_hover_text("The option that answered it");
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 match event.result {
                     ClickResult::Failed => ui.colored_label(ERROR, "failed"),
-                    ClickResult::Ignored => ui.label(RichText::new("ignored").italics().weak()),
+                    ClickResult::Ignored => ui.label(RichText::new("asked").italics().weak()),
                     ClickResult::Pressed => ui.label(RichText::new("pressed").weak()),
-                    ClickResult::Allowed => ui.label(RichText::new("allowed").weak()),
+                    ClickResult::Allowed => ui.colored_label(MATCH, "allowed"),
                     ClickResult::Denied => ui.colored_label(ERROR, "denied"),
                 };
             });
@@ -405,6 +504,7 @@ fn text_block(ui: &mut egui::Ui, text: &str) {
 
 const ERROR: Color32 = Color32::from_rgb(210, 70, 50);
 const MATCH: Color32 = Color32::from_rgb(46, 160, 67);
+const ASK: Color32 = Color32::from_rgb(205, 140, 30);
 
 fn access_hint(access: &Access) -> Option<String> {
     match access {

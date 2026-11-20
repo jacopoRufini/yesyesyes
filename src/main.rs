@@ -1,7 +1,11 @@
 mod app;
+mod autooff;
 mod backend;
 mod core;
 mod gate_server;
+mod llm_bridge;
+mod llm_server;
+mod memory;
 mod icons;
 mod login;
 #[cfg(target_os = "macos")]
@@ -13,6 +17,17 @@ use crate::core::ConfigStore;
 use eframe::egui;
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let [_, flag, dir] = &args[..]
+        && flag == "--iconset"
+    {
+        // Used by scripts/build-macos-app.sh for the icon of the app bundle.
+        if let Err(e) = icons::write_iconset(std::path::Path::new(dir)) {
+            eprintln!("yesyesyes: cannot write the icons: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if std::env::args().any(|a| a == "--dump") {
         std::process::exit(backend::dump());
     }
@@ -21,7 +36,8 @@ fn main() {
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("yesyesyes")
-            .with_inner_size([560.0, 520.0])
+            .with_inner_size([1200.0, 780.0])
+            .with_icon(icons::app())
             .with_visible(false),
         ..Default::default()
     };
