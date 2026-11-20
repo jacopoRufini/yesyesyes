@@ -5,15 +5,26 @@ set -e
 cd "$(dirname "$0")/.."
 # Prefer rustup (Homebrew installs it keg-only): rust-toolchain.toml then picks a recent compiler.
 [ -x /opt/homebrew/opt/rustup/bin/cargo ] && PATH=/opt/homebrew/opt/rustup/bin:$PATH
-cargo build --release
+bin=target/release/yesyesyes
+if [ -n "$UNIVERSAL" ]; then
+  # One binary for Apple Silicon and Intel (used by the release workflow).
+  rustup target add aarch64-apple-darwin x86_64-apple-darwin
+  cargo build --release --target aarch64-apple-darwin
+  cargo build --release --target x86_64-apple-darwin
+  mkdir -p target/universal
+  bin=target/universal/yesyesyes
+  lipo -create -output "$bin" target/aarch64-apple-darwin/release/yesyesyes target/x86_64-apple-darwin/release/yesyesyes
+else
+  cargo build --release
+fi
 app=build/yesyesyes.app
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp target/release/yesyesyes "$app/Contents/MacOS/yesyesyes"
+cp "$bin" "$app/Contents/MacOS/yesyesyes"
 # The icon is drawn by the app itself (src/icons.rs): the status bar Y, black on white.
 rm -rf build/yesyesyes.iconset
-target/release/yesyesyes --iconset build/yesyesyes.iconset
+"$bin" --iconset build/yesyesyes.iconset
 iconutil -c icns -o "$app/Contents/Resources/yesyesyes.icns" build/yesyesyes.iconset
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

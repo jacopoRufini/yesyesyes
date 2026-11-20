@@ -13,7 +13,22 @@ Runs on macOS, Windows and Linux (GNOME). Everything stays on your computer.
 > Answering for you means commands run without you seeing them. Start with narrow rules, keep
 > **Turn off after** on, and review the code before relying on it.
 
-## Requirements
+## Download
+
+Get the latest build from the [Releases page](../../releases/latest), no Rust needed:
+
+| OS | File | Then |
+|---|---|---|
+| macOS | `yesyesyes-macos-universal.zip` | unzip, move `yesyesyes.app` to `/Applications`, right-click → **Open** the first time (the app is not notarized; or `xattr -dr com.apple.quarantine yesyesyes.app`) |
+| Windows | `yesyesyes-windows-x86_64.zip` | unzip and run `yesyesyes.exe` (SmartScreen: **More info** → **Run anyway**) |
+| Linux | `yesyesyes-linux-x86_64.tar.gz` | `tar xzf` it and run `./yesyesyes` |
+
+The builds are unsigned. Then see [Permissions](#permissions) and [Claude Code hook](#claude-code-hook).
+To build it yourself, read on.
+
+## Build from source
+
+### Requirements
 
 - **Rust 1.95 or later**, installed with [rustup](https://rustup.rs) (`rust-toolchain.toml` picks
   the stable toolchain):
@@ -27,7 +42,7 @@ Runs on macOS, Windows and Linux (GNOME). Everything stays on your computer.
 - **Optional**: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) for the hook, and
   [Ollama](https://ollama.com) or [llama.cpp](https://github.com/ggml-org/llama.cpp) for the local LLM.
 
-## Build and run
+### Build and run
 
 ```sh
 git clone <this repository's URL> yesyesyes
@@ -45,7 +60,7 @@ starts it from wherever it is when you tick it.
 
 To update: `git pull`, build again, quit yesyesyes from the tray and start it again.
 
-### Permissions
+## Permissions
 
 Needed for **Notifications** only (the Claude Code hook needs none):
 
@@ -61,7 +76,7 @@ Needed for **Notifications** only (the Claude Code hook needs none):
   The tray icon needs the AppIndicator extension (on by default on Ubuntu); without it the
   window stays open and closing it quits the app.
 
-### Claude Code hook
+## Claude Code hook
 
 Add a `hooks` entry to `~/.claude/settings.json` (keep what is already there; if the file has a
 `hooks` object, add `PermissionRequest` inside it):

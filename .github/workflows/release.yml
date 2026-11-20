@@ -1,0 +1,75 @@
+name: Release
+
+# Push a tag like v0.1.0 (matching the version in Cargo.toml) to build and publish the binaries.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            asset: yesyesyes-macos-universal.zip
+          - os: windows-latest
+            asset: yesyesyes-windows-x86_64.zip
+          - os: ubuntu-22.04
+            asset: yesyesyes-linux-x86_64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches Cargo.toml
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $version"; exit 1; }
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          UNIVERSAL=1 scripts/build-macos-app.sh
+          ditto -c -k --keepParent build/yesyesyes.app "${{ matrix.asset }}"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --release
+          Compress-Archive -Path target\release\yesyesyes.exe,LICENSE,README.md -DestinationPath "${{ matrix.asset }}"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release
+          tar -czf "${{ matrix.asset }}" -C target/release yesyesyes -C ../.. LICENSE README.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
