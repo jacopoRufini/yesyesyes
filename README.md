@@ -1,5 +1,9 @@
 # yesyesyes
 
+[![CI](https://github.com/jacopoRufini/yesyesyes/actions/workflows/ci.yml/badge.svg)](https://github.com/jacopoRufini/yesyesyes/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jacopoRufini/yesyesyes)](https://github.com/jacopoRufini/yesyesyes/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Tray app that answers Claude's permission requests for you, by rules you choose:
 
 - **Claude Code requests**: Claude Code asks yesyesyes, through a local hook, before it asks you.
@@ -45,7 +49,7 @@ To build it yourself, read on.
 ### Build and run
 
 ```sh
-git clone <this repository's URL> yesyesyes
+git clone https://github.com/jacopoRufini/yesyesyes.git
 cd yesyesyes
 ```
 
@@ -248,6 +252,11 @@ cargo clippy --target x86_64-unknown-linux-gnu --all-targets -- -D warnings
 Ollama only): `python3 scripts/llm_eval.py label` marks your recent requests as allow or ask, then
 `python3 scripts/llm_eval.py run` reports right answers, false allows and timings. Its tests:
 `python3 -m unittest discover -s scripts`.
+
+## Contributing
+
+Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Report security
+problems privately, as in [SECURITY.md](SECURITY.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
