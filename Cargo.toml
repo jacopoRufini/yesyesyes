@@ -1,6 +1,6 @@
 [package]
 name = "yesyesyes"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.95"
 description = "Tray app that answers Claude's permission requests by your rules: notification buttons, Claude Code hooks, a regex or a local LLM"
