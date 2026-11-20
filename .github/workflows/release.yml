@@ -22,7 +22,7 @@ jobs:
             asset: yesyesyes-linux-x86_64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the tag matches Cargo.toml
         shell: bash
