@@ -3464,11 +3464,10 @@ dependencies = [
 
 [[package]]
 name = "uiautomation"
-version = "0.25.1"
+version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa2eacf9390a8491bc949b04230f40c12520c6423a2962a6087eea1ef14373af"
+checksum = "4915ae07066ba748456eea8551a89b1f8b9bae7abf7de4a4ce26e80e9604aacb"
 dependencies = [
- "chrono",
  "uiautomation_derive",
  "windows",
  "windows-core",
@@ -3476,9 +3475,9 @@ dependencies = [
 
 [[package]]
 name = "uiautomation_derive"
-version = "0.7.9"
+version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c893ec96e05c3c81ba46f838f3190549ec185ef377d582ab3d44202b2dfacbd"
+checksum = "8baf05e7430496612b91bca9ccf94a26898bef3500d0488efe0e9543327f928e"
 dependencies = [
  "proc-macro2",
  "quote",
